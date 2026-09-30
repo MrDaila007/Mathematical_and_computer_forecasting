@@ -136,6 +136,28 @@
       "norm_label": "tasks.md"
     },
     {
+      "label": "README.md",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "readme",
+      "community": 13,
+      "community_name": "README.md",
+      "norm_label": "readme.md"
+    },
+    {
+      "label": "Mathematical_and_computer_forecasting",
+      "file_type": "document",
+      "source_file": "README.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "readme_mathematical_and_computer_forecasting",
+      "community": 13,
+      "community_name": "README.md",
+      "norm_label": "mathematical_and_computer_forecasting"
+    },
+    {
       "label": "\u041c\u0430\u0442\u0435\u0440\u0438\u0430\u043b\u044b \u043f\u043e \u043f\u0440\u0430\u043a\u0442\u0438\u043a\u0443\u043c\u0443",
       "file_type": "document",
       "source_file": "Lab1/task.md",
@@ -499,7 +521,19 @@
       "source": "lab7_task",
       "target": "lab7_task_\u043b\u0430\u0431\u043e\u0440\u0430\u0442\u043e\u0440\u043d\u0430\u044f_7_arima",
       "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "README.md",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "readme",
+      "target": "readme_mathematical_and_computer_forecasting",
+      "confidence_score": 1.0
     }
   ],
-  "hyperedges": []
+  "hyperedges": [],
+  "built_at_commit": "476503b3bce38b8b80e529be04bb01011381fcaf"
 }

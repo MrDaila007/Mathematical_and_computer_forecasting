@@ -1,13 +1,18 @@
 # Graph Report - Mathematical_and_computer_forecasting  (2026-09-30)
 
 ## Corpus Check
-- 11 files · ~103,796 words
+- 13 files · ~104,047 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 28 nodes · 17 edges · 13 communities (7 shown, 6 thin omitted)
+- 30 nodes · 18 edges · 14 communities (7 shown, 7 thin omitted)
 - Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS
 - Token cost: 0 input · 0 output
+
+## Graph Freshness
+- Built from commit: `476503b3`
+- Run `git rev-parse HEAD` and compare to check if the graph is stale.
+- Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
 - Lab1/task.md
@@ -19,6 +24,7 @@
 - Lab5/task.md
 - Lab6/task.md
 - Lab7/task.md
+- README.md
 
 ## God Nodes (most connected - your core abstractions)
 1. `Литература` - 4 edges
@@ -35,7 +41,7 @@
 ## Surprising Connections (you probably didn't know these)
 - None detected - all connections are within the same source files.
 
-## Communities (13 total, 6 thin omitted)
+## Communities (14 total, 7 thin omitted)
 
 ### Community 0 - "Lab1/task.md"
 Cohesion: 0.40
@@ -50,16 +56,16 @@ Cohesion: 0.67
 Nodes (3): Материалы по практикуму, Ресурсы, Темы разделов по анализу данных в R
 
 ## Knowledge Gaps
-- **14 isolated node(s):** `Ресурсы`, `Темы разделов по анализу данных в R`, `Подготовка отчета`, `Содержательная интерпретация данных`, `Предварительная настройкаR` (+9 more)
+- **15 isolated node(s):** `Ресурсы`, `Темы разделов по анализу данных в R`, `Подготовка отчета`, `Содержательная интерпретация данных`, `Предварительная настройкаR` (+10 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **6 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **7 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Литература` connect `Литература` to `Lab1/task.md`?**
-  _High betweenness centrality (0.077) - this node is a cross-community bridge._
+  _High betweenness centrality (0.067) - this node is a cross-community bridge._
 - **Why does `Материалы по практикуму` connect `Материалы по практикуму` to `Lab1/task.md`?**
-  _High betweenness centrality (0.054) - this node is a cross-community bridge._
+  _High betweenness centrality (0.047) - this node is a cross-community bridge._
 - **What connects `Ресурсы`, `Темы разделов по анализу данных в R`, `Подготовка отчета` to the rest of the system?**
-  _14 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _15 weakly-connected nodes found - possible documentation gaps or missing edges._
