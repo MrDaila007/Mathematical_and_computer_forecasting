@@ -1,0 +1,259 @@
+---
+title: "Лабораторная 4. Регрессионные модели"
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, fig.width = 8, fig.height = 4.5)
+library(fpp3)
+```
+
+## 1. Спрос и температура, январь 2014
+
+```{r}
+jan14 <- vic_elec |>
+  filter(Date >= as.Date("2014-01-01"), Date <= as.Date("2014-01-31")) |>
+  index_by(Date) |>
+  summarise(Demand = sum(Demand), Temperature = max(Temperature))
+autoplot(jan14, Demand)
+jan14 |>
+  ggplot(aes(Temperature, Demand)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE)
+```
+
+В январе более жаркие дни дают больший спрос на кондиционирование, поэтому наклон положительный. Это только летний кусок, не вся кривая «холод и жара».
+
+```{r}
+fit_jan <- jan14 |> model(TSLM(Demand ~ Temperature))
+report(fit_jan)
+augment(fit_jan) |>
+  ggplot(aes(Date, .resid)) +
+  geom_point() +
+  geom_hline(yintercept = 0)
+augment(fit_jan) |>
+  ggplot(aes(.fitted, .resid)) +
+  geom_point() +
+  geom_hline(yintercept = 0)
+```
+
+Остатки не выглядят как ровный шум: есть дни, далеко от линии. Линейной связи на 31 точке мало, модель грубая.
+
+```{r}
+scenarios <- new_data(jan14, 2) |>
+  mutate(Temperature = c(15, 35))
+fc_jan <- forecast(fit_jan, new_data = scenarios)
+fc_jan
+fc_jan |> hilo(level = 95)
+```
+
+При 35°C точечный прогноз выше, чем при 15°C, интервалы широкие. Верить им как плану на день не стоит: 15°C для января в Victoria — холодный день, и зависимость вне облака январских точек может быть другой. На всей истории спрос высокий и в холод, и в жару.
+
+```{r}
+vic_daily <- vic_elec |>
+  index_by(Date) |>
+  summarise(Demand = sum(Demand), Temperature = max(Temperature))
+vic_daily |>
+  ggplot(aes(Temperature, Demand)) +
+  geom_point(alpha = 0.2) +
+  labs(title = "Суточный спрос и максимальная температура")
+```
+
+Облако U-образное. Прямая, оцененная по жаркому январю, не описывает зимние дни.
+
+## 2. Олимпийский бег
+
+```{r}
+olympic_running |>
+  ggplot(aes(Year, Time, colour = Sex)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ Length, scales = "free_y")
+```
+
+Победное время снижается. У коротких дистанций падение выходит на полку, у длинных спад продолжается дольше. Мужчины и женщины идут параллельно, у женщин ряд короче.
+
+```{r}
+fit_oly <- olympic_running |>
+  model(TSLM(Time ~ trend()))
+tidy(fit_oly) |> filter(term == "trend")
+```
+
+Коэффициент `trend` — среднее изменение времени за один шаг индекса. Индекс игр идёт раз в 4 года, поэтому изменение за год примерно в четыре раза меньше этого коэффициента.
+
+```{r}
+augment(fit_oly) |>
+  ggplot(aes(Year, .resid, colour = Sex)) +
+  geom_point() +
+  facet_wrap(~ Length, scales = "free_y") +
+  geom_hline(yintercept = 0)
+```
+
+Остатки систематически положительны в начале и в конце и отрицательны в середине: улучшение замедляется. Прямая завышает будущий спад.
+
+```{r}
+fc_oly <- forecast(fit_oly, h = 1)
+fc_oly |> hilo(level = 95)
+```
+
+Прогноз на следующие Игры (2020, если ряд кончается 2016) — продолжение прямой. Допущения: линейный тренд сохранится, ошибки независимы и одной дисперсии, ключи Length и Sex не влияют друг на друга. По остаткам линейность уже сомнительна, поэтому интервал рисует точность, которой у прямой нет.
+
+## 3. Эластичность в лог-лог модели
+
+Модель \(\log y = \beta_0 + \beta_1 \log x + \varepsilon\).
+
+Отсюда \(y = e^{\beta_0 + \varepsilon} x^{\beta_1}\).
+
+Производная: \(dy/dx = \beta_1 e^{\beta_0 + \varepsilon} x^{\beta_1 - 1} = \beta_1 y / x\).
+
+Эластичность \((dy/dx)\cdot(x/y) = \beta_1\). Коэффициент при логарифме предиктора и есть эластичность: на 1% роста \(x\) ответ \(y\) меняется примерно на \(\beta_1\) процентов.
+
+## 4. Сувениры
+
+```{r}
+autoplot(souvenirs, Sales)
+```
+
+Продажи растут, каждый год есть пик, амплитуда пиков увеличивается. Март с 1988 и декабрь выделяются. Логарифм нужен, потому что размах сезона растёт вместе с уровнем: на исходной шкале одна дисперсия ошибки не подходит.
+
+```{r}
+souv <- souvenirs |>
+  mutate(festival = month(Month) == 3 & year(Month) >= 1988)
+fit_souv <- souv |>
+  model(TSLM(log(Sales) ~ trend() + season() + festival))
+report(fit_souv)
+augment(fit_souv) |>
+  ggplot(aes(Month, .resid)) +
+  geom_point()
+augment(fit_souv) |>
+  ggplot(aes(.fitted, .resid)) +
+  geom_point() +
+  geom_hline(yintercept = 0)
+augment(fit_souv) |>
+  ggplot(aes(factor(month(Month)), .resid)) +
+  geom_boxplot() +
+  labs(x = "Месяц")
+```
+
+Коэффициент тренда — средний месячный рост логарифма продаж. Сезонные дамми показывают, насколько месяц отличается от базового. Дамми фестиваля добавляет мартовский всплеск начиная с 1988. Если остатки по месяцам всё ещё разной ширины или Ljung–Box отвергает независимость, в ряде осталась автокорреляция, и регрессия её не забрала.
+
+```{r}
+augment(fit_souv) |> features(.innov, ljung_box, lag = 24)
+future_souv <- new_data(souv, 36) |>
+  mutate(festival = month(Month) == 3)
+fc_souv <- forecast(fit_souv, new_data = future_souv)
+autoplot(fc_souv, souvenirs)
+```
+
+Прогноз на 1994–1996 продолжает тренд и сезон. Улучшение: ARIMA-ошибки вместо белого шума, или отдельный меняющийся сезонный индекс, потому что амплитуда пиков росла быстрее, чем это ловит один логарифм.
+
+## 5. Бензин США до 2004
+
+```{r}
+gas_train <- us_gasoline |> filter(year(Week) <= 2004)
+gas_test <- us_gasoline |> filter(year(Week) == 2005)
+ks <- 1:8
+gas_fits <- gas_train |>
+  model(
+    K1 = TSLM(Barrels ~ trend() + fourier(K = 1)),
+    K2 = TSLM(Barrels ~ trend() + fourier(K = 2)),
+    K3 = TSLM(Barrels ~ trend() + fourier(K = 3)),
+    K4 = TSLM(Barrels ~ trend() + fourier(K = 4)),
+    K5 = TSLM(Barrels ~ trend() + fourier(K = 5)),
+    K6 = TSLM(Barrels ~ trend() + fourier(K = 6)),
+    K7 = TSLM(Barrels ~ trend() + fourier(K = 7)),
+    K8 = TSLM(Barrels ~ trend() + fourier(K = 8))
+  )
+glance(gas_fits) |> arrange(AICc) |> select(.model, AICc, CV)
+```
+
+Беру K с минимальным AICc.
+
+```{r}
+best_name <- glance(gas_fits) |> slice_min(AICc, n = 1) |> pull(.model)
+best_fit <- gas_fits |> select(all_of(best_name))
+augment(best_fit) |>
+  ggplot(aes(Week)) +
+  geom_line(aes(y = Barrels)) +
+  geom_line(aes(y = .fitted), colour = "red")
+gg_tsresiduals(best_fit)
+augment(best_fit) |> features(.innov, ljung_box, lag = 52)
+fc_gas <- forecast(best_fit, h = 52)
+autoplot(fc_gas, us_gasoline |> filter(year(Week) %in% 2003:2005))
+accuracy(fc_gas, gas_test)
+```
+
+Гармоники повторяют внутригодовую волну, тренд — общий рост. Если Ljung–Box отвергает остатки, в ошибках остаётся короткая память, и прогноз на 2005 год по форме похож на прошлые годы, но локальные скачки поставок не ловит.
+
+## 6. Население Афганистана
+
+```{r}
+afg <- global_economy |>
+  filter(Country == "Afghanistan") |>
+  select(Population)
+autoplot(afg, Population)
+```
+
+До конца 1970-х рост ровный, затем война замедляет его, после 1989 ряд снова идёт вверх. Один линейный тренд это ломает пополам.
+
+```{r}
+fit_afg <- afg |>
+  model(
+    linear = TSLM(Population ~ trend()),
+    piece = TSLM(Population ~ trend(knots = c(1980, 1989)))
+  )
+glance(fit_afg)
+autoplot(afg, Population) +
+  geom_line(aes(y = .fitted, colour = .model),
+            data = augment(fit_afg))
+forecast(fit_afg, h = 5) |>
+  autoplot(afg)
+```
+
+Кусочный тренд повторяет три режима и на пять лет вперёд продолжает последний наклон. Прямая тянет средний наклон за всю историю и завышает или занижает конец ряда.
+
+### Формулы для \(y_t = \beta_0 + \beta_1 t\)
+
+Пусть \(t = 1,\ldots,T\), \(\sum t = T(T+1)/2\), \(\sum t^2 = T(T+1)(2T+1)/6\).
+
+\[
+X'X = \begin{pmatrix} T & \sum t \\ \sum t & \sum t^2 \end{pmatrix}
+= \frac{1}{6}\begin{pmatrix} 6T & 3T(T+1) \\ 3T(T+1) & T(T+1)(2T+1) \end{pmatrix}.
+\]
+
+Определитель \(T\sum t^2 - (\sum t)^2 = T^2(T^2-1)/12\). Обратная матрица:
+
+\[
+(X'X)^{-1} = \frac{2}{T(T^2-1)}
+\begin{pmatrix} (T+1)(2T+1) & -3(T+1) \\ -3(T+1) & 6 \end{pmatrix}.
+\]
+
+\(\hat\beta = (X'X)^{-1} X'y\), поэтому
+
+\[
+\hat\beta_0 = \frac{2}{T(T-1)}\left[(2T+1)\sum y_t - 3\sum t y_t\right],
+\quad
+\hat\beta_1 = \frac{6}{T(T^2-1)}\left[2\sum t y_t - (T+1)\sum y_t\right].
+\]
+
+Прогноз в момент \(T+h\): \(\hat y = \hat\beta_0 + \hat\beta_1(T+h)\), дисперсия \(\sigma^2\left[1 + x^*(X'X)^{-1}(x^*)'\right]\) при \(x^* = (1,\ T+h)\). Подстановка даёт
+
+\[
+\mathrm{Var}(\hat y_{T+h}) = \sigma^2\left[1 + \frac{2}{T(T-1)}\left(1 - 4T - 6h + 6\frac{(T+h)^2}{T+1}\right)\right].
+\]
+
+Проверка на ряде Афганистана: закрытая форма и `lm` совпадают.
+
+```{r}
+y <- afg$Population
+Tlen <- length(y)
+tt <- seq_len(Tlen)
+sy <- sum(y)
+sty <- sum(tt * y)
+b1 <- 6 / (Tlen * (Tlen^2 - 1)) * (2 * sty - (Tlen + 1) * sy)
+b0 <- 2 / (Tlen * (Tlen - 1)) * ((2 * Tlen + 1) * sy - 3 * sty)
+c(b0, b1)
+coef(lm(y ~ tt))
+```

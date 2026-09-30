@@ -1,0 +1,177 @@
+{
+  "Lab1/data/DATA/QC1.TXT": {
+    "mtime": 783609544.0,
+    "ast_hash": "60948f3a7dd7f4c315ae5d23838b940d",
+    "semantic_hash": ""
+  },
+  "Lab1/data/DATA/QC10.TXT": {
+    "mtime": 783610646.0,
+    "ast_hash": "3b48a5349162759ab0f2985e74b2cd8f",
+    "semantic_hash": ""
+  },
+  "Lab1/data/DATA/QC11.TXT": {
+    "mtime": 783610976.0,
+    "ast_hash": "ff16005db2f8d5b73feddbc9ea73dfc8",
+    "semantic_hash": ""
+  },
+  "Lab1/data/DATA/QC12.TXT": {
+    "mtime": 783610910.0,
+    "ast_hash": "c1c2de1aeff293762406d6c46821b313",
+    "semantic_hash": ""
+  },
+  "Lab1/data/DATA/QC13.TXT": {
+    "mtime": 783611220.0,
+    "ast_hash": "088f9b3e32e8a67d70c70642bc1e7d20",
+    "semantic_hash": ""
+  },
+  "Lab1/data/DATA/QC14.TXT": {
+    "mtime": 783611110.0,
+    "ast_hash": "b36b7786ec56666d93ca4323f55f8be4",
+    "semantic_hash": ""
+  },
+  "Lab1/data/DATA/QC2.TXT": {
+    "mtime": 783609420.0,
+    "ast_hash": "8e4d1ed23480bf656e03526dbfa14c15",
+    "semantic_hash": ""
+  },
+  "Lab1/data/DATA/QC3.TXT": {
+    "mtime": 783609926.0,
+    "ast_hash": "531a5503d911eeee3eefd08dc19f39fb",
+    "semantic_hash": ""
+  },
+  "Lab1/data/DATA/QC4.TXT": {
+    "mtime": 783609858.0,
+    "ast_hash": "34ebcaf86260c38ef92d362110f64f14",
+    "semantic_hash": ""
+  },
+  "Lab1/data/DATA/QC5.TXT": {
+    "mtime": 783610252.0,
+    "ast_hash": "84cc8e9e37c01c6d85082585383fd65e",
+    "semantic_hash": ""
+  },
+  "Lab1/data/DATA/QC6.TXT": {
+    "mtime": 783610166.0,
+    "ast_hash": "16ac56e3e18cb349e7a0564995ca6bc6",
+    "semantic_hash": ""
+  },
+  "Lab1/data/DATA/QC7.TXT": {
+    "mtime": 783610504.0,
+    "ast_hash": "25c1ff754a0480757cb9a058a5282474",
+    "semantic_hash": ""
+  },
+  "Lab1/data/DATA/QC8.TXT": {
+    "mtime": 783610430.0,
+    "ast_hash": "e333f11b07d46a0aea05fcef29e8fc84",
+    "semantic_hash": ""
+  },
+  "Lab1/data/DATA/QC9.TXT": {
+    "mtime": 783610756.0,
+    "ast_hash": "0191d9fe7e3e6007f6c0800aa1133523",
+    "semantic_hash": ""
+  },
+  "Lab1/task.md": {
+    "mtime": 1790777293.0052617,
+    "ast_hash": "1acd71c0d0806bf1986a8fa5a3a7d367",
+    "semantic_hash": ""
+  },
+  "Lab2/lab2.html": {
+    "mtime": 1790779686.3629158,
+    "ast_hash": "6300f57f6422d210d80f6eea93426c20",
+    "semantic_hash": ""
+  },
+  "Lab2/task.md": {
+    "mtime": 1790778657.7640996,
+    "ast_hash": "3949a7ced5cba50c72066bce15099f77",
+    "semantic_hash": ""
+  },
+  "Lab3/lab3.html": {
+    "mtime": 1790779703.3479042,
+    "ast_hash": "dcaafe274612ba4e1fa76f6ec65f9232",
+    "semantic_hash": ""
+  },
+  "Lab3/task.md": {
+    "mtime": 1790778720.7410822,
+    "ast_hash": "707300f5e59f92b576b67cea1cd978da",
+    "semantic_hash": ""
+  },
+  "Lab4/lab4.html": {
+    "mtime": 1790779712.809898,
+    "ast_hash": "ee48df4ed88b1edbe661fd05ea971d84",
+    "semantic_hash": ""
+  },
+  "Lab4/task.md": {
+    "mtime": 1790778772.5120697,
+    "ast_hash": "287298c130bf52ee3d8f4d539893fe8d",
+    "semantic_hash": ""
+  },
+  "Lab5/lab5.html": {
+    "mtime": 1790785382.2638662,
+    "ast_hash": "7e391ad46e1c6cb4fd815ff848555991",
+    "semantic_hash": ""
+  },
+  "Lab5/task.md": {
+    "mtime": 1790778829.4890575,
+    "ast_hash": "febdca4989ce185a8f852964442cb48b",
+    "semantic_hash": ""
+  },
+  "Lab6/lab6.html": {
+    "mtime": 1790785368.558876,
+    "ast_hash": "b201debb300bb457f4a4700eae23904f",
+    "semantic_hash": ""
+  },
+  "Lab6/task.md": {
+    "mtime": 1790778900.0030448,
+    "ast_hash": "a078f26c6e41536f82c7e54f59e47c48",
+    "semantic_hash": ""
+  },
+  "Lab7/lab7.html": {
+    "mtime": 1790785650.2146692,
+    "ast_hash": "2007c4d8c21fd650af19485c85fc8417",
+    "semantic_hash": ""
+  },
+  "Lab7/task.md": {
+    "mtime": 1790778981.0350325,
+    "ast_hash": "360942948c90f3ee77117362bba60aa6",
+    "semantic_hash": ""
+  },
+  "materials/Forecast_MAG_l01.md": {
+    "mtime": 1790777285.8152559,
+    "ast_hash": "71857217e7fe40068635eab55597f860",
+    "semantic_hash": ""
+  },
+  "materials/lecture_02.md": {
+    "mtime": 1790777287.199257,
+    "ast_hash": "c124c95ca1be769e0c8ac186d320e97b",
+    "semantic_hash": ""
+  },
+  "materials/umk.md": {
+    "mtime": 1790777291.9152608,
+    "ast_hash": "a271209d01470be2e5dfc16d190df1df",
+    "semantic_hash": ""
+  },
+  "tasks.md": {
+    "mtime": 1790778598.9251182,
+    "ast_hash": "ef8589e2f8262d07904986ac0bde241e",
+    "semantic_hash": ""
+  },
+  "materials/Forecast_MAG_l01.pdf": {
+    "mtime": 1790776162.332776,
+    "ast_hash": "375399b8499cbab41f8185502ca11e59",
+    "semantic_hash": ""
+  },
+  "materials/lecture 02.pdf": {
+    "mtime": 1790776196.3028545,
+    "ast_hash": "06fd90170fb745c256c397bc6367deee",
+    "semantic_hash": ""
+  },
+  "materials/umk.pdf": {
+    "mtime": 1790776235.0039384,
+    "ast_hash": "db8c12c688d86dd7f7a215d8fe9f8712",
+    "semantic_hash": ""
+  },
+  "Lab2/acfguess.png": {
+    "mtime": 1790778660.2290988,
+    "ast_hash": "3914d52991a055e54b639f34c17d697a",
+    "semantic_hash": ""
+  }
+}

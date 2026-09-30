@@ -1,0 +1,437 @@
+---
+title: "Лабораторная 7. ARIMA"
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, fig.width = 8, fig.height = 4.5)
+library(fpp3)
+set.seed(20260930)
+retail_id <- sample(aus_retail$`Series ID`, 1)
+myseries <- aus_retail |> filter(`Series ID` == retail_id)
+```
+
+## 1. ACF белого шума разной длины
+
+Границы значимости примерно \(\pm 1.96/\sqrt{T}\). При \(T=36\) они широкие, при \(T=1000\) узкие. Сами выборочные корреляции — разные конечные выборки, поэтому картинки не совпадают, хотя процесс один. Все три графика совместимы с белым шумом: корреляции жмутся к нулю, доля выбросов за границы близка к 5%. На коротком ряде один-два лага за границей ещё ничего не доказывают. На длинном ряде границы ближе к нулю, поэтому мелкий шум оценки чаще их касается.
+
+```{r}
+set.seed(1)
+wn <- function(n) {
+  tsibble(t = seq_len(n), y = rnorm(n), index = t) |>
+    ACF(y) |>
+    autoplot() +
+    labs(title = paste("Белый шум, T =", n))
+}
+wn(36)
+wn(360)
+wn(1000)
+```
+
+## 2. Amazon
+
+```{r}
+amzn <- gafa_stock |> filter(Symbol == "AMZN")
+autoplot(amzn, Close)
+amzn |> ACF(Close) |> autoplot()
+amzn |> PACF(Close) |> autoplot()
+```
+
+Цена блуждает, ACF затухает очень медленно, PACF даёт большой первый лаг. Так выглядит ряд с единичным корнем. Нужна разность, иначе ARMA на уровнях будет с коэффициентом около 1 и бесполезными интервалами.
+
+## 3. Преобразование и разности
+
+```{r}
+stationarise <- function(data, y, name) {
+  y <- enquo(y)
+  lam <- data |> features(!!y, guerrero) |> pull(lambda_guerrero)
+  transformed <- data |> mutate(z = box_cox(!!y, lam))
+  nd <- transformed |> features(z, unitroot_ndiffs) |> pull(ndiffs)
+  ns <- transformed |> features(z, unitroot_nsdiffs) |> pull(nsdiffs)
+  cat(name, " lambda =", round(lam, 3), " nsdiffs =", ns, " ndiffs =", nd, "\n")
+  out <- transformed
+  if (ns > 0) out <- out |> mutate(z = difference(z, lag = 12))
+  # квартал и год обработаем ниже отдельно, если период не 12
+  if (nd > 0) out <- out |> mutate(z = difference(z, lag = 1))
+  print(autoplot(out, z))
+  print(out |> ACF(z) |> autoplot())
+  invisible(list(lambda = lam, ns = ns, nd = nd))
+}
+```
+
+Турецкий ВВП — год, сезонной разности нет:
+
+```{r}
+turkey <- global_economy |> filter(Country == "Turkey") |> select(GDP)
+lam_tr <- turkey |> features(GDP, guerrero) |> pull(lambda_guerrero)
+tr <- turkey |> mutate(z = box_cox(GDP, lam_tr))
+c(lambda = lam_tr,
+  ndiffs = tr |> features(z, unitroot_ndiffs) |> pull(ndiffs))
+tr |> mutate(z = difference(z)) |> ACF(z) |> autoplot()
+```
+
+Размещение в Тасмании — квартал:
+
+```{r}
+tas <- aus_accommodation |>
+  filter(State == "Tasmania") |>
+  select(Takings)
+lam_tas <- tas |> features(Takings, guerrero) |> pull(lambda_guerrero)
+tas_z <- tas |> mutate(z = box_cox(Takings, lam_tas))
+c(lambda = lam_tas,
+  nsdiffs = tas_z |> features(z, unitroot_nsdiffs) |> pull(nsdiffs),
+  ndiffs = tas_z |> features(z, unitroot_ndiffs) |> pull(ndiffs))
+tas_z |>
+  mutate(z = difference(z, lag = 4) |> difference()) |>
+  ACF(z) |>
+  autoplot()
+```
+
+Сувениры — месяц. Обычно нужны логарифм, сезонная разность и обычная разность:
+
+```{r}
+lam_s <- souvenirs |> features(Sales, guerrero) |> pull(lambda_guerrero)
+souv <- souvenirs |> mutate(z = box_cox(Sales, lam_s))
+c(lambda = lam_s,
+  nsdiffs = souv |> features(z, unitroot_nsdiffs) |> pull(nsdiffs),
+  ndiffs = souv |> features(z, unitroot_ndiffs) |> pull(ndiffs))
+souv_diff <- souv |>
+  mutate(z = difference(difference(z, 12)))
+autoplot(souv_diff, z)
+souv_diff |> ACF(z) |> autoplot()
+```
+
+## 4. Сувениры в операторах сдвига
+
+Для логарифма продаж (λ близка к 0, беру \(\log\)) сезонная и первая разности:
+
+\[
+(1-B)(1-B^{12})\log y_t = \varepsilon_t
+\]
+
+если тесты просят обе разности. Это ARIMA(0,1,0)(0,1,0)\(_{12}\) без константы. Если обычная разность после сезонной уже не нужна, остаётся \((1-B^{12})\log y_t\).
+
+## 5. Розничный ряд
+
+```{r}
+lam_r <- myseries |> features(Turnover, guerrero) |> pull(lambda_guerrero)
+ret <- myseries |> mutate(z = box_cox(Turnover, lam_r))
+c(lambda = lam_r,
+  nsdiffs = ret |> features(z, unitroot_nsdiffs) |> pull(nsdiffs),
+  ndiffs = ret |> features(z, unitroot_ndiffs) |> pull(ndiffs))
+ret |>
+  mutate(z = difference(difference(z, 12))) |>
+  ACF(z) |>
+  autoplot()
+```
+
+Месячный розничный оборот после Box–Cox обычно требует сезонной разности и одной обычной. ACF после этого быстро затухает.
+
+## 6. Имитация
+
+```{r}
+sim_ar1 <- function(phi, n = 100, sigma = 1) {
+  e <- rnorm(n, sd = sigma)
+  y <- numeric(n)
+  for (t in 2:n) y[t] <- phi * y[t - 1] + e[t]
+  tsibble(t = seq_len(n), y = y, index = t)
+}
+set.seed(7)
+autoplot(sim_ar1(0.6), y) + labs(title = "AR(1), phi = 0.6")
+autoplot(sim_ar1(0.95), y) + labs(title = "AR(1), phi = 0.95")
+autoplot(sim_ar1(-0.6), y) + labs(title = "AR(1), phi = -0.6")
+```
+
+Чем ближе \(\phi_1\) к 1, тем длиннее память и тем больше ряд гуляет. Отрицательный коэффициент даёт пилу.
+
+```{r}
+sim_ma1 <- function(theta, n = 100, sigma = 1) {
+  e <- rnorm(n + 1, sd = sigma)
+  y <- e[-1] + theta * e[-(n + 1)]
+  tsibble(t = seq_len(n), y = y, index = t)
+}
+set.seed(7)
+autoplot(sim_ma1(0.6), y) + labs(title = "MA(1), theta = 0.6")
+autoplot(sim_ma1(0.95), y) + labs(title = "MA(1), theta = 0.95")
+```
+
+MA(1) остаётся короткой памятью при любом \(\theta\). Меняется только сила соседнего выброса.
+
+```{r}
+sim_arma <- function(phi, theta, n = 100) {
+  e <- rnorm(n + 1)
+  y <- numeric(n)
+  y[1] <- e[2]
+  for (t in 2:n) y[t] <- phi * y[t - 1] + e[t + 1] + theta * e[t]
+  tsibble(t = seq_len(n), y = y, index = t)
+}
+sim_ar2 <- function(phi1, phi2, n = 100) {
+  e <- rnorm(n)
+  y <- numeric(n)
+  for (t in 3:n) y[t] <- phi1 * y[t - 1] + phi2 * y[t - 2] + e[t]
+  tsibble(t = seq_len(n), y = y, index = t)
+}
+set.seed(7)
+autoplot(sim_arma(0.6, 0.6), y) + labs(title = "ARMA(1,1)")
+autoplot(sim_ar2(-0.8, 0.3), y) + labs(title = "AR(2), не стационарен")
+```
+
+Условие стационарности AR(2): \(|\phi_2|<1\), \(\phi_1+\phi_2<1\), \(\phi_2-\phi_1<1\). Здесь \(\phi_2-\phi_1 = 1.1 > 1\), корень вне единичного круга, ряд разъезжается. ARMA(1,1) с \(|\phi|<1\) остаётся на месте.
+
+## 7. Авиапассажиры Австралии
+
+```{r}
+fit_air <- aus_airpassengers |>
+  model(
+    auto = ARIMA(Passengers),
+    arima010 = ARIMA(Passengers ~ 1 + pdq(0, 1, 0)),
+    arima212 = ARIMA(Passengers ~ 1 + pdq(2, 1, 2)),
+    arima212_noc = ARIMA(Passengers ~ 0 + pdq(2, 1, 2)),
+    arima021 = ARIMA(Passengers ~ 1 + pdq(0, 2, 1))
+  )
+glance(fit_air) |> select(.model, AIC, AICc, BIC)
+report(fit_air |> select(auto))
+gg_tsresiduals(fit_air |> select(auto))
+autoplot(forecast(fit_air, h = 10), aus_airpassengers)
+```
+
+`ARIMA()` выбирает порядок по AICc; остатки этой модели должны быть близки к белому шуму. В операторах выбранная модель читается из `report`: для ARIMA(p,d,q) с константой это \((1-\phi(B))(1-B)^d y_t = c + (1+\theta(B))\varepsilon_t\).
+
+ARIMA(0,1,0) с дрейфом — случайное блуждание с наклоном, прогноз прямая. ARIMA(2,1,2) с дрейфом гнёт эту прямую короткой памятью. Без константы наклон пропадает, прогноз выходит на горизонталь. ARIMA(0,2,1) с константой даёт квадратичный тренд: константа при второй разности — это прирост наклона. На десяти годах парабола уже неправдоподобна.
+
+## 8. ВВП США
+
+```{r}
+us <- global_economy |> filter(Country == "United States") |> select(GDP)
+lam_us <- us |> features(GDP, guerrero) |> pull(lambda_guerrero)
+us_fit <- us |>
+  model(
+    auto = ARIMA(box_cox(GDP, lam_us)),
+    arima210 = ARIMA(box_cox(GDP, lam_us) ~ pdq(2, 1, 0)),
+    arima011 = ARIMA(box_cox(GDP, lam_us) ~ 1 + pdq(0, 1, 1)),
+    ets = ETS(GDP)
+  )
+glance(us_fit) |> select(.model, AIC, AICc)
+gg_tsresiduals(us_fit |> select(auto))
+autoplot(forecast(us_fit, h = 10), us)
+```
+
+Лучший по AICc среди ARIMA оставляю, если остатки без структуры. ETS без преобразования тоже растёт, но интервалы и форма тренда другие: ETS не разностный. На таком гладком ряде оба прогноза разумны и близки на 5–10 лет.
+
+## 9. Прибытия из Японии
+
+```{r}
+japan <- aus_arrivals |> filter(Origin == "Japan")
+autoplot(japan, Arrivals)
+japan |>
+  mutate(d = difference(difference(Arrivals, 4))) |>
+  ACF(d) |>
+  autoplot()
+japan |>
+  mutate(d = difference(difference(Arrivals, 4))) |>
+  PACF(d) |>
+  autoplot()
+fit_j <- japan |>
+  model(
+    chosen = ARIMA(Arrivals ~ pdq(1, 1, 1) + PDQ(0, 1, 1)),
+    auto = ARIMA(Arrivals)
+  )
+glance(fit_j)
+report(fit_j)
+gg_tsresiduals(fit_j |> select(auto))
+```
+
+После сезонной и обычной разности ACF обрывается на коротких лагах и на лаге 4, PACF затухает. Это похоже на сезонную MA плюс короткую AR/MA, то есть что-то вроде ARIMA(1,1,1)(0,1,1)\(_4\). Если `ARIMA()` выбирает другой порядок, сравниваю AICc и остатки и оставляю модель с меньшим AICc и остатками без сезонного пика.
+
+Запись авто-модели беру из `report`. Без оператора сдвига для ARIMA(1,1,1)(0,1,1)\(_4\):
+
+\[
+(1-\phi_1 B)(1-B)(1-B^4) y_t = (1+\theta_1 B)(1+\Theta_1 B^4)\varepsilon_t.
+\]
+
+## 10. Занятость, розничная торговля США
+
+```{r}
+retail_us <- us_employment |> filter(Title == "Retail Trade")
+dcmp <- retail_us |> model(STL(Employed))
+components(dcmp) |> autoplot()
+lam_e <- retail_us |> features(Employed, guerrero) |> pull(lambda_guerrero)
+c(lambda = lam_e,
+  ns = retail_us |>
+    mutate(z = box_cox(Employed, lam_e)) |>
+    features(z, unitroot_nsdiffs) |> pull(nsdiffs),
+  nd = retail_us |>
+    mutate(z = box_cox(Employed, lam_e)) |>
+    features(z, unitroot_ndiffs) |> pull(ndiffs))
+fit_e <- retail_us |>
+  model(
+    a = ARIMA(box_cox(Employed, lam_e)),
+    b = ARIMA(box_cox(Employed, lam_e) ~ pdq(2, 1, 0) + PDQ(0, 1, 1)),
+    c = ARIMA(box_cox(Employed, lam_e) ~ pdq(0, 1, 1) + PDQ(0, 1, 1))
+  )
+glance(fit_e) |> select(.model, AICc) |> arrange(AICc)
+best_e <- glance(fit_e) |> slice_min(AICc, n = 1) |> pull(.model)
+gg_tsresiduals(fit_e |> select(all_of(best_e)))
+fc_e <- forecast(fit_e |> select(all_of(best_e)), h = 36)
+autoplot(fc_e)
+fc_e |> hilo(level = 95) |> slice_tail(n = 3)
+```
+
+Тренд занятости длинный, сезон годовой и устойчивый. λ часто близка к 1: преобразование слабое. Ряд не стационарен, пока не сняты сезонная и обычная разности. Прогноз на три года ещё полезен. Дальше интервал шириной в заметную долю уровня: практически им пользоваться трудно уже после 5–8 лет, когда ширина сопоставима с самим приростом.
+
+Свежий ряд с FRED в этот прогон не подгружался. Хвост `us_employment` — это фактические значения внутри пакета; отдельной сверки с сегодняшним релизом нет.
+
+## 11. Электричество Австралии
+
+Ряд квартальный, 24 месяца — это 8 кварталов.
+
+```{r}
+elec <- aus_production |> select(Electricity)
+autoplot(elec, Electricity)
+lam_el <- elec |> features(Electricity, guerrero) |> pull(lambda_guerrero)
+c(lambda = lam_el,
+  ns = elec |> mutate(z = box_cox(Electricity, lam_el)) |>
+    features(z, unitroot_nsdiffs) |> pull(nsdiffs),
+  nd = elec |> mutate(z = box_cox(Electricity, lam_el)) |>
+    features(z, unitroot_ndiffs) |> pull(ndiffs))
+fit_el <- elec |>
+  model(
+    a = ARIMA(box_cox(Electricity, lam_el)),
+    b = ARIMA(box_cox(Electricity, lam_el) ~ pdq(1, 1, 1) + PDQ(0, 1, 1)),
+    c = ARIMA(box_cox(Electricity, lam_el) ~ pdq(0, 1, 2) + PDQ(1, 1, 0)),
+    ets = ETS(Electricity)
+  )
+glance(fit_el) |> select(.model, AIC, AICc) |> arrange(AICc)
+best_el <- glance(fit_el) |>
+  filter(.model != "ets") |>
+  slice_min(AICc, n = 1) |>
+  pull(.model)
+gg_tsresiduals(fit_el |> select(all_of(best_el)))
+autoplot(forecast(fit_el |> select(all_of(best_el), ets), h = 8), elec)
+```
+
+Сезонная ARIMA и ETS дают похожий год вперёд. ARIMA гибче в короткой памяти остатка, ETS жёстче держит сезон. Если остатки ARIMA чистые, оставляю её.
+
+## 12. Несезонная модель по STL
+
+```{r}
+stl_fit <- elec |>
+  model(
+    stl_arima = decomposition_model(
+      STL(box_cox(Electricity, lam_el) ~ season(window = "periodic")),
+      ARIMA(season_adjust)
+    ),
+    seasonal = ARIMA(box_cox(Electricity, lam_el))
+  )
+autoplot(forecast(stl_fit, h = 8), elec)
+accuracy(stl_fit)
+```
+
+Сезонная ARIMA обычно предпочтительнее: сезон оценен вместе с остальной моделью. STL+несезонная ARIMA хорош, когда сезонный рисунок хочется снять заранее, но на этом ряде оба близки. Беру сезонную ARIMA, если у неё меньше AICc и остатки без пика на лаге 4.
+
+## 13. Туризм
+
+```{r}
+fit_tour <- tourism |> model(ARIMA(Trips))
+fc_tour <- forecast(fit_tour, h = 8)
+focus <- c("Snowy Mountains", "Melbourne")
+autoplot(fc_tour |> filter(Region %in% focus),
+         tourism |> filter(Region %in% focus))
+```
+
+Прогнозы по регионам в целом повторяют сезон. Snowy Mountains — горный сезон, пик не обязан совпадать с пляжным Melbourne. Если интервал накрывает историю и не уходит в отрицательные ночёвки слишком часто, прогноз выглядит приемлемо. Отдельные короткие ряды с нулями ARIMA прогнозирует хуже: там среднее и сезон прыгают.
+
+## 14. Розница, сезонная ARIMA
+
+```{r}
+train <- myseries |> filter(year(Month) < 2011)
+test <- anti_join(myseries, train)
+lam <- myseries |> features(Turnover, guerrero) |> pull(lambda_guerrero)
+fit_r <- train |>
+  model(
+    arima = ARIMA(box_cox(Turnover, lam)),
+    ets = ETS(Turnover ~ error("M") + trend("A") + season("M")),
+    snaive = SNAIVE(Turnover)
+  )
+fc_r <- forecast(fit_r, new_data = test)
+accuracy(fc_r, myseries) |> arrange(RMSE)
+autoplot(fc_r, myseries)
+```
+
+Сравнение с фактическим хвостом `aus_retail` после 2010 года. Более свежую таблицу ABS (каталог 8501.0) в этот прогон не скачивал: в пакете ряд и так обрывается, и тест — это последние наблюдавшиеся месяцы. ARIMA или ETS обычно бьют SNAIVE, потому что учитывают тренд. Кто из ARIMA и ETS точнее, видно по RMSE на этом хвосте.
+
+## 15. Заяц
+
+Модель \(y_t = c + \phi_1 y_{t-1} + \phi_2 y_{t-2} + \phi_3 y_{t-3} + \phi_4 y_{t-4} + \varepsilon_t\) — это ARIMA(4,0,0) с константой: \(p=4\), \(d=0\), \(q=0\).
+
+```{r}
+hare <- pelt |> select(Hare)
+autoplot(hare, Hare)
+hare |> ACF(Hare) |> autoplot()
+hare |> PACF(Hare) |> autoplot()
+```
+
+ACF колеблется и затухает (цикл около 10 лет), PACF обрывается после нескольких первых лагов. Это довод в пользу авторегрессии, а не скользящего среднего. Четыре лага покрывают заметную часть цикла.
+
+```{r}
+c0 <- 30993
+phi <- c(0.82, -0.29, -0.01, -0.22)
+hist_y <- hare$Hare
+last4 <- tail(hist_y, 4)
+manual <- numeric(3)
+for (h in 1:3) {
+  lags <- rev(tail(c(hist_y, manual)[seq_len(length(hist_y) + h - 1)], 4))
+  manual[h] <- c0 + sum(phi * lags)
+}
+manual
+fit_hare <- hare |> model(ARIMA(Hare ~ 1 + pdq(4, 0, 0)))
+report(fit_hare)
+forecast(fit_hare, h = 3)
+```
+
+Ручной счёт использует округлённые коэффициенты из задания и только последние наблюдения. `forecast()` заново оценивает \(\phi\) и константу по всему ряду. Константа в формуле ARIMA может быть средним, а не свободным членом \(c\): \(\mu = c / (1-\sum\phi)\). Поэтому числа рядом, но не равны.
+
+## 16. Население Швейцарии
+
+Модель
+
+\[
+y_t = c + y_{t-1} + \phi_1(y_{t-1}-y_{t-2}) + \phi_2(y_{t-2}-y_{t-3}) + \phi_3(y_{t-3}-y_{t-4}) + \varepsilon_t
+\]
+
+— это ARIMA(3,1,0) с дрейфом. \(p=3\), \(d=1\), \(q=0\).
+
+```{r}
+swiss <- global_economy |>
+  filter(Country == "Switzerland") |>
+  mutate(Pop = Population / 1e6) |>
+  select(Pop)
+autoplot(swiss, Pop)
+swiss |> mutate(d = difference(Pop)) |> ACF(d) |> autoplot()
+swiss |> mutate(d = difference(Pop)) |> PACF(d) |> autoplot()
+```
+
+Разность похожа на короткую авторегрессию: PACF значим на первых лагах и дальше стихает, ACF затухает. Тренд в уровнях снимается одной разностью, отсюда \(d=1\), а не вторая.
+
+```{r}
+c_s <- 0.0053
+phi_s <- c(1.64, -1.17, 0.45)
+y_s <- swiss$Pop
+manual_s <- numeric(3)
+for (h in 1:3) {
+  series <- c(y_s, manual_s)[seq_len(length(y_s) + h - 1)]
+  n <- length(series)
+  d1 <- series[n] - series[n - 1]
+  d2 <- series[n - 1] - series[n - 2]
+  d3 <- series[n - 2] - series[n - 3]
+  manual_s[h] <- c_s + series[n] + sum(phi_s * c(d1, d2, d3))
+}
+manual_s
+fit_swiss <- swiss |> model(ARIMA(Pop ~ 1 + pdq(3, 1, 0)))
+report(fit_swiss)
+forecast(fit_swiss, h = 3)
+```
+
+Ручной прогноз подставляет коэффициенты из задания. R оценивает их по выборке 1960–2017, поэтому \(\phi\) и дрейф чуть другие, и прогноз на 2018–2020 расходится на сотые миллиона. Округление коэффициентов до двух знаков уже даёт заметный уход на трёх шагах, потому что модель рекурсивная.

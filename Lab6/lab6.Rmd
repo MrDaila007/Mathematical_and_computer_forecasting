@@ -1,0 +1,364 @@
+---
+title: "Лабораторная 6. Экспоненциальное сглаживание"
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, fig.width = 8, fig.height = 4.5)
+library(fpp3)
+set.seed(20260930)
+retail_id <- sample(aus_retail$`Series ID`, 1)
+myseries <- aus_retail |> filter(`Series ID` == retail_id)
+```
+
+## 1. Свиньи Victoria, простое сглаживание
+
+```{r}
+pigs <- aus_livestock |>
+  filter(State == "Victoria", Animal == "Pigs")
+fit_ses <- pigs |>
+  model(ETS(Count ~ error("A") + trend("N") + season("N")))
+report(fit_ses)
+fc_ses <- forecast(fit_ses, h = 4)
+autoplot(fc_ses, pigs |> slice_tail(n = 60))
+s <- sqrt(glance(fit_ses)$sigma2)
+yhat <- as_tibble(fc_ses)$.mean[1]
+c(lower = yhat - 1.96 * s, upper = yhat + 1.96 * s)
+fc_ses |> hilo(level = 95) |> slice(1)
+```
+
+Для первого шага интервал \(\hat y \pm 1.96 s\) совпадает с интервалом ETS(A,N,N): дисперсия ошибки на горизонте 1 равна \(\sigma^2\).
+
+## 2. Своя SES
+
+```{r}
+ses_forecast <- function(y, alpha, level) {
+  ell <- level
+  for (val in y) ell <- alpha * val + (1 - alpha) * ell
+  ell
+}
+alpha <- tidy(fit_ses) |> filter(term == "alpha") |> pull(estimate)
+level0 <- tidy(fit_ses) |> filter(term == "l[0]") |> pull(estimate)
+own <- ses_forecast(pigs$Count, alpha, level0)
+c(own = own, ets = as_tibble(fc_ses)$.mean[1])
+```
+
+Прогноз на следующий месяц совпадает с ETS: это та же рекурсия.
+
+## 3. Подбор через optim
+
+```{r}
+ses_sse <- function(par, y) {
+  alpha <- par[1]
+  level <- par[2]
+  if (alpha < 0 || alpha > 1) return(1e12)
+  ell <- level
+  sse <- 0
+  for (val in y) {
+    sse <- sse + (val - ell)^2
+    ell <- alpha * val + (1 - alpha) * ell
+  }
+  sse
+}
+opt <- optim(c(0.3, pigs$Count[1]), ses_sse, y = pigs$Count)
+opt$par
+c(alpha = alpha, level0 = level0)
+```
+
+Оценки близки к ETS. Мелкое отличие возможно: ETS минимизирует правдоподобие с оценкой \(\sigma^2\), а здесь — сумму квадратов одношаговых ошибок. На практике числа почти одни.
+
+## 4. Оценка и прогноз вместе
+
+```{r}
+ses_auto <- function(y) {
+  sse <- function(par) ses_sse(par, y)
+  opt <- optim(c(0.2, y[1]), sse)
+  list(alpha = opt$par[1], level = opt$par[2],
+       forecast = ses_forecast(y, opt$par[1], opt$par[2]))
+}
+ses_auto(pigs$Count)
+```
+
+## 5. Экспорт одной страны
+
+Беру Новую Зеландию: годовой ряд без сезона, с долгим ростом и провалами.
+
+```{r}
+nz_exp <- global_economy |>
+  filter(Country == "New Zealand") |>
+  select(Exports)
+autoplot(nz_exp, Exports)
+fit_exp <- nz_exp |>
+  model(
+    ANN = ETS(Exports ~ error("A") + trend("N") + season("N")),
+    AAN = ETS(Exports ~ error("A") + trend("A") + season("N"))
+  )
+accuracy(fit_exp)
+report(fit_exp)
+autoplot(forecast(fit_exp, h = 10), nz_exp)
+```
+
+RMSE на обучении у модели с трендом меньше, но у неё на один параметр больше. Если наклон в конце ряда другой, чем средний, AAN уезжает. ANN честнее, когда ряд блуждает вокруг уровня. Смотрю оба прогноза: если последние годы плоские, ANN предпочтительнее.
+
+Интервал первого шага из RMSE:
+
+```{r}
+rmse <- accuracy(fit_exp)$RMSE
+fc1 <- as_tibble(forecast(fit_exp, h = 1))
+fc1 |>
+  mutate(lo = .mean - 1.96 * rmse[match(.model, accuracy(fit_exp)$.model)],
+         hi = .mean + 1.96 * rmse[match(.model, accuracy(fit_exp)$.model)])
+forecast(fit_exp, h = 1) |> hilo(level = 95)
+```
+
+Ручной интервал по RMSE обучения близок к интервалу R для ANN. У AAN дисперсия прогноза на шаг вперёд чуть больше \(\sigma^2\), потому что оценивается ещё наклон, поэтому интервал R шире.
+
+## 6. ВВП Китая
+
+```{r}
+china <- global_economy |> filter(Country == "China") |> select(GDP)
+fit_china <- china |>
+  model(
+    AAN = ETS(GDP ~ error("A") + trend("A") + season("N")),
+    AAdN = ETS(GDP ~ error("A") + trend("Ad") + season("N")),
+    box = ETS(box_cox(GDP, 0.3) ~ error("A") + trend("A") + season("N"))
+  )
+autoplot(forecast(fit_china, h = 30), china)
+```
+
+Без демпфирования прямая в логарифмическом или исходном масштабе уходит круто вверх. Демпфирование загибает тренд. Box–Cox с λ = 0.3 сжимает поздние огромные значения, и прогноз на исходной шкале растёт медленнее, чем у модели без преобразования. На длинном горизонте разница видна сразу.
+
+## 7. Газ Австралии
+
+Сезонная амплитуда растёт вместе с уровнем, поэтому мультипликативный сезон. Аддитивный сезон оставлял бы одинаковые зубцы и не попадал в поздние пики.
+
+```{r}
+gas <- aus_production |> select(Gas)
+fit_gas <- gas |>
+  model(
+    MAM = ETS(Gas ~ error("M") + trend("A") + season("M")),
+    MAdM = ETS(Gas ~ error("M") + trend("Ad") + season("M"))
+  )
+report(fit_gas)
+accuracy(fit_gas)
+autoplot(forecast(fit_gas, h = 12), gas)
+```
+
+Демпфирование немного снижает RMSE, если рост в конце уже не такой крутой. Если AICc и RMSE почти равны, оставляю MAM: демпфирование на коротком прогнозе мало что меняет, а параметр лишний.
+
+## 8. Розница, Holt–Winters
+
+Мультипликативный сезон нужен по той же причине, что и у газа: размах года растёт.
+
+```{r}
+fit_hw <- myseries |>
+  model(
+    HW = ETS(Turnover ~ error("M") + trend("A") + season("M")),
+    HWd = ETS(Turnover ~ error("M") + trend("Ad") + season("M"))
+  )
+accuracy(fit_hw)
+best_hw <- accuracy(fit_hw) |> slice_min(RMSE, n = 1) |> pull(.model)
+gg_tsresiduals(fit_hw |> select(all_of(best_hw)))
+
+train <- myseries |> filter(year(Month) <= 2010)
+test <- anti_join(myseries, train)
+fit_test <- train |>
+  model(
+    HW = ETS(Turnover ~ error("M") + trend("A") + season("M")),
+    HWd = ETS(Turnover ~ error("M") + trend("Ad") + season("M")),
+    SNAIVE = SNAIVE(Turnover)
+  )
+fc_test <- forecast(fit_test, new_data = test)
+accuracy(fc_test, myseries) |> arrange(RMSE)
+```
+
+Holt–Winters обгоняет SNAIVE на тесте, если в ряде есть тренд: SNAIVE копирует только последний год. Остатки лучшей модели ближе к шуму, чем у SNAIVE, но на сезонных лагах корреляция может остаться.
+
+## 9. STL и ETS на рознице
+
+```{r}
+lam <- myseries |> features(Turnover, guerrero) |> pull(lambda_guerrero)
+fit_stl <- train |>
+  model(
+    stl_ets = decomposition_model(
+      STL(box_cox(Turnover, lam) ~ season(window = "periodic")),
+      ETS(season_adjust ~ error("A") + trend("A") + season("N"))
+    )
+  )
+fc_stl <- forecast(fit_stl, new_data = test)
+accuracy(fc_stl, myseries)
+accuracy(fc_test, myseries) |> arrange(RMSE)
+```
+
+Сравниваю RMSE на том же тесте после 2010. STL+ETS часто рядом с Holt–Winters. Если сезон жесткий, мультипликативный HW проще и не хуже. Если форма сезона плывёт, STL выигрывает.
+
+## 10. Поездки по Австралии
+
+```{r}
+trips <- tourism |>
+  index_by(Quarter) |>
+  summarise(Trips = sum(Trips))
+autoplot(trips, Trips)
+fit_trips <- trips |>
+  model(
+    stl_damped = decomposition_model(
+      STL(Trips ~ season(window = "periodic")),
+      ETS(season_adjust ~ error("A") + trend("Ad") + season("N"))
+    ),
+    stl_holt = decomposition_model(
+      STL(Trips ~ season(window = "periodic")),
+      ETS(season_adjust ~ error("A") + trend("A") + season("N"))
+    ),
+    ets = ETS(Trips)
+  )
+trips |>
+  model(STL(Trips ~ season(window = "periodic"))) |>
+  components() |>
+  autoplot(season_adjust)
+accuracy(fit_trips)
+autoplot(forecast(fit_trips, h = 8), trips)
+gg_tsresiduals(fit_trips |> select(ets))
+```
+
+Ряд сезонный, с ростом. ETS сам выбирает сезонную модель. RMSE на обучении сравниваю в таблице `accuracy`: меньший RMSE — более тесная подгонка, не обязательно лучший прогноз. На графике прогнозов демпфированный тренд осторожнее. Остатки выбранной сезонной ETS должны быть без сезонных пиков; если пики остались, сезон не подобран.
+
+## 11. Прибытия из Новой Зеландии
+
+Мультипликативный сезон: размах кварталов растёт вместе с числом прибытий.
+
+```{r}
+nz <- aus_arrivals |> filter(Origin == "NZ")
+autoplot(nz, Arrivals)
+nz_train <- nz |> slice_head(n = nrow(nz) - 8)
+nz_test <- anti_join(nz, nz_train)
+fit_nz <- nz_train |>
+  model(
+    HW = ETS(Arrivals ~ error("M") + trend("A") + season("M")),
+    ETSlog = ETS(log(Arrivals)),
+    SNAIVE = SNAIVE(Arrivals),
+    STLets = decomposition_model(
+      STL(log(Arrivals) ~ season(window = "periodic")),
+      ETS(season_adjust ~ error("A") + trend("A") + season("N"))
+    )
+  )
+fc_nz <- forecast(fit_nz, new_data = nz_test)
+accuracy(fc_nz, nz) |> arrange(RMSE)
+gg_tsresiduals(fit_nz |> select(HW))
+```
+
+```{r}
+nz_cv <- nz |> stretch_tsibble(.init = 40, .step = 4)
+fc_cv <- nz_cv |>
+  model(
+    HW = ETS(Arrivals ~ error("M") + trend("A") + season("M")),
+    ETSlog = ETS(log(Arrivals)),
+    SNAIVE = SNAIVE(Arrivals),
+    STLets = decomposition_model(
+      STL(log(Arrivals) ~ season(window = "periodic")),
+      ETS(season_adjust ~ error("A") + trend("A") + season("N"))
+    )
+  ) |>
+  forecast(h = 4) |>
+  accuracy(nz)
+fc_cv |> arrange(RMSE)
+```
+
+Кросс-валидация с шагом в год и горизонтом в год обычно сохраняет тот же порядок методов, что и один тест из последних двух лет, но разрывы меньше: один удачный или неудачный год больше не решает всё.
+
+## 12. Цемент, ошибка на 4 шага
+
+```{r}
+cement <- aus_production |> select(Cement)
+cement_cv <- cement |> stretch_tsibble(.init = 5 * 4, .step = 1)
+fc_cem <- cement_cv |>
+  model(
+    ETS = ETS(Cement),
+    SNAIVE = SNAIVE(Cement)
+  ) |>
+  forecast(h = 4)
+h4 <- as_tibble(fc_cem) |>
+  group_by(.model, .id) |>
+  mutate(h = row_number()) |>
+  filter(h == 4) |>
+  ungroup() |>
+  select(.model, Quarter, .mean) |>
+  left_join(as_tibble(cement) |> rename(actual = Cement), by = "Quarter")
+h4 |>
+  group_by(.model) |>
+  summarise(MSE = mean((actual - .mean)^2), .groups = "drop")
+```
+
+ETS обычно точнее SNAIVE на четыре квартала вперёд: у цемента есть тренд, а сезонный наивный его не продолжает. Это ожидаемо.
+
+## 13. Пять рядов, тест три года
+
+```{r}
+beer <- aus_production |> select(Beer) |> filter(!is.na(Beer))
+bricks <- aus_production |> select(Bricks) |> filter(!is.na(Bricks))
+a10 <- PBS |>
+  filter(ATC2 == "A10") |>
+  index_by(Month) |>
+  summarise(Cost = sum(Cost))
+h02 <- PBS |>
+  filter(ATC2 == "H02") |>
+  index_by(Month) |>
+  summarise(Cost = sum(Cost))
+food <- aus_retail |>
+  filter(Industry == "Food retailing") |>
+  index_by(Month) |>
+  summarise(Turnover = sum(Turnover))
+
+compare3 <- function(data, response, h) {
+  response <- ensym(response)
+  train <- data |> slice_head(n = nrow(data) - h)
+  test <- anti_join(data, train)
+  fit <- train |>
+    model(
+      ETS = ETS(!!response),
+      SNAIVE = SNAIVE(!!response),
+      STL = decomposition_model(
+        STL(!!response ~ season(window = "periodic")),
+        ETS(season_adjust ~ error("A") + trend("A") + season("N"))
+      )
+    )
+  forecast(fit, new_data = test) |>
+    accuracy(data) |>
+    arrange(RMSE)
+}
+compare3(beer, Beer, 12)
+compare3(bricks, Bricks, 12)
+compare3(a10, Cost, 36)
+compare3(h02, Cost, 36)
+compare3(food, Turnover, 36)
+```
+
+На пиве и еде сезонные методы близки. На кирпиче тест попадает на спад производства, и все три метода ошибаются, STL иногда чуть лучше. На расходах PBS выигрывает ETS или STL, SNAIVE отстаёт, если есть тренд.
+
+## 14. Когда ETS выбирает плохо
+
+```{r}
+trips |>
+  model(ETS(Trips)) |>
+  forecast(h = 8) |>
+  autoplot(trips)
+
+stocks <- gafa_stock |>
+  as_tibble() |>
+  group_by(Symbol) |>
+  mutate(day = row_number()) |>
+  ungroup() |>
+  as_tsibble(index = day, key = Symbol, regular = TRUE)
+fit_stocks <- stocks |> model(ETS(Close))
+report(fit_stocks)
+autoplot(forecast(fit_stocks, h = 30), stocks |> slice_tail(n = 120))
+
+lynx <- pelt |> select(Lynx)
+fit_lynx <- lynx |> model(ETS(Lynx))
+report(fit_lynx)
+autoplot(forecast(fit_lynx, h = 10), lynx)
+gg_tsresiduals(fit_lynx)
+```
+
+На сумме поездок ETS уместен: есть сезон и тренд, которые экспоненциальное сглаживание умеет. На ценах акций ETS либо рисует дрейф, либо плоский уровень. Цикла и смены режима там нет, прогноз — прямая, а цена так не продолжится. Рысь — цикл около 10 лет. Годовой ETS без сезона (сезона длины 1 нет) не умеет цикл: прогноз затухает к среднему или к прямой, а остатки остаются циклическими. ETS здесь плох, потому что в семействе нет циклической компоненты, только уровень, тренд и календарный сезон.

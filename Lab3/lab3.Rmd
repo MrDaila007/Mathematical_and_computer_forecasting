@@ -1,0 +1,242 @@
+---
+title: "Лабораторная 3. Декомпозиция"
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, fig.width = 8, fig.height = 4.5)
+library(fpp3)
+```
+
+```{r}
+set.seed(20260930)
+retail_id <- sample(aus_retail$`Series ID`, 1)
+myseries <- aus_retail |> filter(`Series ID` == retail_id)
+```
+
+## 1. ВВП на душу населения
+
+```{r}
+gdp_pc <- global_economy |>
+  mutate(gdp_pc = GDP / Population) |>
+  select(Country, Year, gdp_pc)
+autoplot(gdp_pc, gdp_pc) +
+  labs(title = "ВВП на душу населения", y = "ВВП / человек")
+
+gdp_pc |>
+  as_tibble() |>
+  filter(!is.na(gdp_pc)) |>
+  slice_max(gdp_pc, n = 1)
+
+top_now <- gdp_pc |>
+  as_tibble() |>
+  group_by(Country) |>
+  slice_max(Year, n = 1) |>
+  ungroup() |>
+  slice_max(gdp_pc, n = 5)
+top_now
+```
+
+Лидер по уровню меняется: долго вверху Монако, Лихтенштейн и нефтедобывающие экономики, к концу выборки в пятёрке остаются небольшие богатые страны. У большинства стран ряд растёт, но разрыв не схлопывается.
+
+## 2. Когда нужно преобразование
+
+```{r}
+us_gdp <- global_economy |> filter(Country == "United States")
+autoplot(us_gdp, GDP)
+lambda_us <- us_gdp |> features(GDP, guerrero) |> pull(lambda_guerrero)
+lambda_us
+autoplot(us_gdp, box_cox(GDP, lambda_us))
+```
+
+ВВП США растёт с увеличивающимся размахом. Box–Cox (λ около 0.3) делает колебания более ровными; логарифм тоже подходит.
+
+```{r}
+bulls <- aus_livestock |>
+  filter(Animal == "Bulls, bullocks and steers", State == "Victoria")
+autoplot(bulls, Count)
+lambda_bulls <- bulls |> features(Count, guerrero) |> pull(lambda_guerrero)
+lambda_bulls
+autoplot(bulls, box_cox(Count, lambda_bulls))
+```
+
+У забоя размах меняется умеренно. Преобразование слегка выравнивает дисперсию, форма ряда остаётся той же.
+
+```{r}
+vic_day <- vic_elec |>
+  index_by(Date) |>
+  summarise(Demand = sum(Demand))
+autoplot(vic_day, Demand)
+```
+
+Суточный спрос уже довольно стабилен по размаху, сильное преобразование не нужно: виден сезон и недельный ритм, а не веер.
+
+```{r}
+autoplot(aus_production, Gas)
+lambda_gas <- aus_production |> features(Gas, guerrero) |> pull(lambda_guerrero)
+lambda_gas
+autoplot(aus_production, box_cox(Gas, lambda_gas))
+```
+
+У газа сезонная амплитуда растёт вместе с уровнем. λ заметно меньше 1, после преобразования сезонные зубцы ближе по высоте.
+
+## 3. Почему Box–Cox бесполезен для canadian_gas
+
+```{r}
+autoplot(canadian_gas, Volume)
+lambda_cg <- canadian_gas |> features(Volume, guerrero) |> pull(lambda_guerrero)
+lambda_cg
+autoplot(canadian_gas, box_cox(Volume, lambda_cg))
+gg_season(canadian_gas, Volume)
+```
+
+Дисперсия и так не раздувается пропорционально уровню. Мешает другое: форма сезона со временем меняется. Степенное преобразование одинаково растягивает все даты и эту смену формы не убирает.
+
+## 4. Box–Cox для розничного ряда
+
+```{r}
+lambda_retail <- myseries |> features(Turnover, guerrero) |> pull(lambda_guerrero)
+lambda_retail
+autoplot(myseries, Turnover)
+autoplot(myseries, box_cox(Turnover, lambda_retail))
+```
+
+Беру λ Гьерреро. Она меньше 1: сезонная амплитуда растёт, логарифм или степень около нуля выравнивает её.
+
+## 5. Ещё три ряда
+
+```{r}
+show_lambda <- function(data, y) {
+  y <- enquo(y)
+  lam <- data |> features(!!y, guerrero) |> pull(lambda_guerrero)
+  print(lam)
+  print(autoplot(data, !!y))
+  print(autoplot(data, box_cox(!!y, lam)))
+  invisible(lam)
+}
+show_lambda(aus_production |> select(Tobacco) |> filter(!is.na(Tobacco)), Tobacco)
+
+economy <- ansett |> filter(Airports == "MEL-SYD", Class == "Economy")
+show_lambda(economy, Passengers)
+
+south <- pedestrian |>
+  filter(Sensor == "Southern Cross Station") |>
+  index_by(Date) |>
+  summarise(Count = sum(Count))
+show_lambda(south, Count)
+```
+
+Табак: λ ближе к 1, преобразование слабое. Пассажиры и пешеходы: λ меньше 1, после преобразования пики не так доминируют.
+
+## 6. Скользящее среднее \(3 \times 5\)
+
+Сначала окно 5 с равными весами \(1/5\), затем окно 3 с весами \(1/3\). Свёртка даёт окно длины \(5+3-1=7\):
+
+```{r}
+conv <- function(a, b) {
+  out <- numeric(length(a) + length(b) - 1)
+  for (i in seq_along(a)) {
+    out[i:(i + length(b) - 1)] <- out[i:(i + length(b) - 1)] + a[i] * b
+  }
+  out
+}
+w <- conv(rep(1 / 5, 5), rep(1 / 3, 3))
+round(w, 3)
+```
+
+Веса 0.067, 0.133, 0.200, 0.200, 0.200, 0.133, 0.067. Крайние точки попадают только в одно из окон длины 5, соседние — в два, центральные — в три, отсюда доли \(1/15\), \(2/15\), \(3/15\).
+
+```{r}
+gas <- aus_production |> select(Gas)
+one <- gas$Gas
+ma5 <- stats::filter(one, rep(1 / 5, 5), sides = 2)
+ma3of5 <- as.numeric(stats::filter(ma5, rep(1 / 3, 3), sides = 2))
+wma7 <- as.numeric(stats::filter(one, w, sides = 2))
+max(abs(ma3of5 - wma7), na.rm = TRUE)
+```
+
+Расхождение на уровне машинного нуля: два способа совпадают.
+
+## 7. Газ, последние пять лет
+
+```{r}
+gas5 <- aus_production |>
+  select(Gas) |>
+  slice_tail(n = 5 * 4)
+autoplot(gas5, Gas)
+```
+
+Виден сезонный пик внутри года и слабый тренд на коротком окне.
+
+```{r}
+fit_classical <- gas5 |>
+  model(classical_decomposition(Gas, type = "multiplicative"))
+components(fit_classical) |> autoplot()
+components(fit_classical) |>
+  autoplot(season_adjust)
+```
+
+Сезонные индексы повторяют внутригодовой рисунок графика, тренд почти плоский. Это согласуется с тем, что на пяти годах главная структура — сезон, а не длинный цикл.
+
+```{r}
+gas_mid <- gas5 |>
+  mutate(Gas = if_else(row_number() == n() %/% 2, Gas + 300, Gas))
+gas_end <- gas5 |>
+  mutate(Gas = if_else(row_number() == n(), Gas + 300, Gas))
+adj <- function(data) {
+  data |>
+    model(classical_decomposition(Gas, type = "multiplicative")) |>
+    components() |>
+    autoplot(season_adjust)
+}
+adj(gas_mid)
+adj(gas_end)
+```
+
+Выброс в середине портит и тренд, и сезонно сглаженный ряд на несколько соседних кварталов: классическая декомпозиция тянет скользящее среднее. Выброс на краю почти не влияет на середину ряда, но крайние оценки тренда и так отсутствуют (окно не достраивается), поэтому искажение локализовано у конца.
+
+## 8. X-11 для розницы
+
+```{r}
+x11_fit <- myseries |>
+  model(x11 = X_13ARIMA_SEATS(Turnover ~ x11()))
+components(x11_fit) |> autoplot()
+```
+
+X-11 отделяет тренд, сезон и остаток. В остатке видны отдельные месяцы, которые на исходном графике терялись на фоне растущего сезона: это кандидаты в выбросы. Сезон устойчивый, тренд гладкий.
+
+## 9. Рабочая сила Австралии, рис. 3.19–3.20
+
+На рисунках книги тренд — самая крупная компонента: численность рабочей силы за 1978–1995 выросла на миллионы, внутри года сезон — это десятки тысяч и он почти не меняет форму. Остаток ещё меньше. Рецессия 1991/1992 видна как провал тренда и полоса отрицательных остатков, а не как слом сезонной фигуры. Масштаб осей здесь главный: сезон нельзя читать как «большое» движение только потому, что его график заполняет панель.
+
+## 10. Меняющаяся сезонность canadian_gas
+
+```{r}
+autoplot(canadian_gas, Volume)
+gg_subseries(canadian_gas, Volume)
+gg_season(canadian_gas, Volume)
+```
+
+Зимний пик со временем сдвигается и меняет высоту относительно лета. Это не одна и та же сезонная кривая.
+
+```{r}
+stl_fit <- canadian_gas |>
+  model(STL(Volume ~ season(window = 7)))
+stl_cmp <- components(stl_fit)
+autoplot(stl_cmp)
+gg_season(stl_cmp, season_year)
+autoplot(stl_cmp, season_adjust)
+```
+
+Короткое окно `season(window = 7)` позволяет сезонной форме ползти. На `gg_season` ранние и поздние годы рисуют разные профили. Сезонно сглаженный ряд сохраняет длинный тренд и уже не прыгает каждый январь.
+
+```{r}
+x11_cg <- canadian_gas |> model(x11 = X_13ARIMA_SEATS(Volume ~ x11()))
+seats_cg <- canadian_gas |> model(seats = X_13ARIMA_SEATS(Volume ~ seats()))
+autoplot(components(x11_cg))
+autoplot(components(seats_cg))
+```
+
+X-11 и SEATS тоже выделяют сезон, но их сезонная компонента жёстче: они хуже повторяют плавную смену формы, которую даёт STL с коротким окном. Остатки X-11/SEATS из-за этого крупнее в годы, когда профиль сезона уже другой. Для этого ряда предпочтительнее STL.

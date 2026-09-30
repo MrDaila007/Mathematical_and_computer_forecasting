@@ -1,0 +1,279 @@
+---
+title: "Лабораторная 5. Toolbox"
+output:
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, fig.width = 8, fig.height = 4.5)
+library(fpp3)
+set.seed(20260930)
+retail_id <- sample(aus_retail$`Series ID`, 1)
+myseries <- aus_retail |> filter(`Series ID` == retail_id)
+```
+
+## 1. Какой бенчмарк уместен
+
+Население Австралии почти прямая — дрейф. Кирпич и ягнята сезонные — SNAIVE. Богатство домохозяйств растёт без сезона — дрейф. Takeaway сезонный и растущий — SNAIVE как простой ориентир, дрейф сезон не повторит.
+
+```{r}
+aus_pop <- global_economy |>
+  filter(Country == "Australia") |>
+  select(Population)
+bricks <- aus_production |> select(Bricks) |> filter(!is.na(Bricks))
+lambs <- aus_livestock |>
+  filter(State == "New South Wales", Animal == "Lambs")
+wealth <- hh_budget |> select(Wealth)
+takeaway <- aus_retail |>
+  filter(Industry == "Takeaway food services") |>
+  index_by(Month) |>
+  summarise(Turnover = sum(Turnover))
+
+fit_pop <- aus_pop |> model(RW(Population ~ drift()))
+fit_bricks <- bricks |> model(SNAIVE(Bricks))
+fit_lambs <- lambs |> model(SNAIVE(Count))
+fit_wealth <- wealth |> model(RW(Wealth ~ drift()))
+fit_take <- takeaway |> model(SNAIVE(Turnover))
+
+autoplot(forecast(fit_pop, h = 10), aus_pop)
+autoplot(forecast(fit_bricks, h = 8), bricks)
+autoplot(forecast(fit_lambs, h = 12), lambs)
+autoplot(forecast(fit_wealth, h = 4), wealth)
+autoplot(forecast(fit_take, h = 12), takeaway)
+```
+
+## 2. Facebook и дрейф
+
+Дрейф: \(\hat y_{T+h} = y_T + h(y_T - y_1)/(T-1)\). Это та же прямая, что через первую и последнюю точки, продолженная на \(h\) шагов.
+
+```{r}
+fb <- gafa_stock |>
+  filter(Symbol == "FB") |>
+  mutate(trading_day = row_number()) |>
+  update_tsibble(index = trading_day, regular = TRUE)
+autoplot(fb, Close)
+n <- nrow(fb)
+slope <- (fb$Close[n] - fb$Close[1]) / (n - 1)
+h <- 1:30
+line_fc <- fb$Close[n] + h * slope
+fit_fb <- fb |> model(
+  drift = RW(Close ~ drift()),
+  naive = NAIVE(Close),
+  mean = MEAN(Close)
+)
+fc_fb <- forecast(fit_fb |> select(drift), h = 30)
+max(abs(as_tibble(fc_fb)$.mean - line_fc))
+autoplot(forecast(fit_fb, h = 30), fb)
+```
+
+Разница дрейфа и прямой — машинный ноль. Среднее и наивный без дрейфа хуже: у цены есть наклон, а сезона, который стоило бы копировать, нет. Дрейф здесь лучший из трёх простых методов, хотя для цены это всё равно не модель доходности.
+
+## 3. Пиво с 1992 года
+
+```{r}
+beer <- aus_production |>
+  select(Beer) |>
+  filter(year(Quarter) >= 1992)
+fit_beer <- beer |> model(SNAIVE(Beer))
+gg_tsresiduals(fit_beer)
+augment(fit_beer) |> features(.innov, ljung_box, lag = 8)
+autoplot(forecast(fit_beer, h = 8), beer)
+```
+
+После 1992 ряд почти стабилен по уровню и сезону. Остатки близки к белому шуму, сезонный наивный — разумный прогноз: следующий год похож на предыдущий.
+
+## 4. Экспорт и кирпич
+
+Экспорт Австралии — годовой ряд без сезона, беру наивный (случайное блуждание): долгосрочного ровного наклона, как у населения, нет. Кирпич квартальный, сезонный — SNAIVE.
+
+```{r}
+exports <- global_economy |>
+  filter(Country == "Australia") |>
+  select(Exports)
+fit_exp <- exports |> model(NAIVE(Exports))
+gg_tsresiduals(fit_exp)
+autoplot(forecast(fit_exp, h = 5), exports)
+
+fit_br <- bricks |> model(SNAIVE(Bricks))
+gg_tsresiduals(fit_br)
+autoplot(forecast(fit_br, h = 8), bricks)
+```
+
+У экспорта остатки похожи на шум вокруг нуля, наивный уместен. У кирпича сезон сильный, но есть ещё тренд и обрыв производства: SNAIVE повторяет последний год и не продолжает спад. Остатки из-за этого не белый шум.
+
+## 5. Семь рядов Victoria
+
+```{r}
+vic <- aus_livestock |> filter(State == "Victoria")
+fit_vic <- vic |> model(SNAIVE(Count))
+autoplot(forecast(fit_vic, h = 12), vic)
+```
+
+Для рядов с устойчивым сезоном и без сильного тренда это нормальная точка отсчёта. Там, где есть долгий спад или рост (часть поголовья), SNAIVE застывает на последнем годе и как прогноз уровня слабоват. Как бенчмарк, который обязан обойти более сложная модель, он всё равно полезен.
+
+## 6. Верно или нет
+
+1. «Хороший метод обязан иметь нормальные остатки» — нет. Для точечного прогноза важны нулевое среднее и отсутствие корреляции. Нормальность нужна, только если интервалы строятся из нормального закона.
+2. «Маленькие остатки дают хороший прогноз» — нет. Остатки считаются на обучении. Модель может заучить историю и развалиться на новых данных.
+3. «Лучшая мера точности — MAPE» — нет. При значениях около нуля MAPE взрывается, и она не симметрична. RMSE или MAE часто честнее; меру выбирают под задачу.
+4. «Если прогнозирует плохо, усложняй» — нет. Сначала проверить данные, преобразование и бенчмарк. Лишние параметры подгоняют шум.
+5. «Всегда бери модель с лучшей точностью на тесте» — нет. Один тестовый кусок случаен. Перебор десятков моделей на том же тесте подгоняет уже тест. Разницу в третьем знаке MAPE не стоит считать победой.
+
+## 7. Розничный ряд до 2011
+
+```{r}
+myseries_train <- myseries |> filter(year(Month) < 2011)
+autoplot(myseries, Turnover) +
+  autolayer(myseries_train, Turnover, colour = "red")
+fit_retail <- myseries_train |> model(SNAIVE(Turnover))
+gg_tsresiduals(fit_retail)
+fc_retail <- forecast(fit_retail, h = nrow(anti_join(myseries, myseries_train)))
+autoplot(fc_retail, myseries)
+accuracy(fc_retail, myseries)
+
+train_late <- myseries |> filter(year(Month) >= 2005, year(Month) < 2011)
+fit_late <- train_late |> model(SNAIVE(Turnover))
+fc_late <- forecast(fit_late, new_data = anti_join(myseries, myseries_train))
+accuracy(fc_late, myseries)
+accuracy(fc_retail, myseries)
+```
+
+Остатки SNAIVE коррелированы: кроме сезона в ряде есть тренд, и копирование прошлого года его не снимает. На нормальность они тоже не похожи. Точность слабо зависит от того, взять ли всю историю до 2011 или только 2005–2010: сезонный наивный и так смотрит лишь на последний год обучения.
+
+## 8. Свиньи, New South Wales
+
+```{r}
+pigs <- aus_livestock |>
+  filter(State == "New South Wales", Animal == "Pigs")
+autoplot(pigs, Count)
+gg_season(pigs, Count)
+n_test <- 72
+pigs_train <- pigs |> slice_head(n = nrow(pigs) - n_test)
+pigs_test <- anti_join(pigs, pigs_train)
+c(train = nrow(pigs_train), test = nrow(pigs_test))
+fit_pigs <- pigs_train |>
+  model(
+    mean = MEAN(Count),
+    naive = NAIVE(Count),
+    snaive = SNAIVE(Count),
+    drift = RW(Count ~ drift())
+  )
+fc_pigs <- forecast(fit_pigs, new_data = pigs_test)
+accuracy(fc_pigs, pigs) |> arrange(RMSE)
+gg_tsresiduals(fit_pigs |> select(snaive))
+```
+
+Лучший по RMSE на тесте — тот, у кого меньше ошибка в таблице `accuracy` (обычно SNAIVE или дрейф, если есть наклон). Остатки выбранного сезонного наивного не белый шум, если в ряде остался тренд: бенчмарк всё равно оставляем как точку сравнения.
+
+## 9. Богатство, последние 4 года
+
+```{r}
+wealth_train <- wealth |> filter(Year <= max(Year) - 4)
+wealth_test <- anti_join(wealth, wealth_train)
+fit_w <- wealth_train |>
+  model(
+    mean = MEAN(Wealth),
+    naive = NAIVE(Wealth),
+    drift = RW(Wealth ~ drift())
+  )
+fc_w <- forecast(fit_w, new_data = wealth_test)
+accuracy(fc_w, wealth) |>
+  group_by(.model) |>
+  summarise(RMSE = mean(RMSE), MAPE = mean(MAPE)) |>
+  arrange(RMSE)
+best_w <- accuracy(fc_w, wealth) |>
+  group_by(.model) |>
+  summarise(RMSE = mean(RMSE)) |>
+  slice_min(RMSE, n = 1, with_ties = FALSE) |>
+  pull(.model)
+gg_tsresiduals(fit_w |> filter(Country == "Australia") |> select(all_of(best_w)))
+```
+
+Дрейф обычно выигрывает: богатство растёт. Остатки годового ряда короткие, до белого шума им далеко, и это нормально для такого бенчмарка.
+
+## 10. Takeaway, последние 4 года
+
+```{r}
+take_train <- takeaway |> filter(year(Month) <= max(year(Month)) - 4)
+take_test <- anti_join(takeaway, take_train)
+fit_t <- take_train |>
+  model(
+    mean = MEAN(Turnover),
+    naive = NAIVE(Turnover),
+    snaive = SNAIVE(Turnover),
+    drift = RW(Turnover ~ drift())
+  )
+fc_t <- forecast(fit_t, new_data = take_test)
+accuracy(fc_t, takeaway) |> arrange(RMSE)
+gg_tsresiduals(fit_t |> select(snaive))
+```
+
+SNAIVE лучше среднего и наивного без сезона: оборот внутри года качается. Дрейф сезон пропускает. Остатки SNAIVE всё ещё коррелированы из-за тренда.
+
+## 11. Кирпич и STL
+
+```{r}
+fit_stl <- bricks |>
+  model(
+    fixed = decomposition_model(
+      STL(Bricks ~ season(window = "periodic")),
+      NAIVE(season_adjust)
+    ),
+    changing = decomposition_model(
+      STL(Bricks ~ season(window = 7)),
+      NAIVE(season_adjust)
+    ),
+    robust = decomposition_model(
+      STL(Bricks ~ season(window = "periodic"), robust = TRUE),
+      NAIVE(season_adjust)
+    )
+  )
+stl_fixed <- bricks |> model(STL(Bricks ~ season(window = "periodic")))
+components(stl_fixed) |> autoplot()
+components(stl_fixed) |> autoplot(season_adjust)
+gg_tsresiduals(fit_stl |> select(fixed))
+gg_tsresiduals(fit_stl |> select(robust))
+```
+
+Сезонно сглаженный ряд — это тренд плюс остаток. Наивный метод тянет его вперёд по последнему значению, `decomposition_model` возвращает сезон. Робастный STL почти не меняет картину, если сильных выбросов мало. Остатки не вполне белый шум: в кирпиче есть переломы уровня.
+
+```{r}
+bricks_train <- bricks |> slice_head(n = nrow(bricks) - 8)
+bricks_test <- anti_join(bricks, bricks_train)
+cmp <- bricks_train |>
+  model(
+    stl = decomposition_model(
+      STL(Bricks ~ season(window = "periodic")),
+      NAIVE(season_adjust)
+    ),
+    snaive = SNAIVE(Bricks)
+  )
+fc_br <- forecast(cmp, new_data = bricks_test)
+accuracy(fc_br, bricks)
+autoplot(fc_br, bricks |> slice_tail(n = 40))
+```
+
+На последних двух годах выигрывает тот метод, у которого меньше RMSE. Если уровень в конце падает, наивный по сглаженному ряду и SNAIVE оба запаздывают; STL чуть честнее, когда сезон менялся.
+
+## 12. Gold Coast
+
+```{r}
+gc_tourism <- tourism |>
+  filter(Region == "Gold Coast") |>
+  index_by(Quarter) |>
+  summarise(Trips = sum(Trips))
+train_for <- function(years_held) {
+  gc_tourism |> slice_head(n = nrow(gc_tourism) - 4 * years_held)
+}
+fits <- list(
+  gc_fc_1 = train_for(1) |> model(SNAIVE(Trips)) |> forecast(h = 4),
+  gc_fc_2 = train_for(2) |> model(SNAIVE(Trips)) |> forecast(h = 4),
+  gc_fc_3 = train_for(3) |> model(SNAIVE(Trips)) |> forecast(h = 4)
+)
+bind_rows(lapply(names(fits), function(nm) {
+  accuracy(fits[[nm]], gc_tourism) |> mutate(window = nm)
+})) |> select(window, MAPE, RMSE)
+```
+
+MAPE скачет от года к году: один тестовый год — слишком короткая проверка. Сезонный наивный стабилен как метод, но оценка его точности на одном годе шумная.
